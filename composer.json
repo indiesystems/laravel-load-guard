@@ -1,0 +1,52 @@
+{
+    "name": "indiesystems/laravel-load-guard",
+    "description": "A Laravel package that prevents server overload by monitoring CPU, memory, and swap usage with automatic throttling",
+    "keywords": ["laravel", "load", "guard", "monitoring", "throttling", "circuit-breaker", "server", "resources"],
+    "type": "library",
+    "license": "MIT",
+    "authors": [{
+        "name": "Chris Dimas",
+        "email": "chris@indie.systems",
+        "homepage": "https://indie.systems",
+        "role": "Developer"
+    }],
+    "homepage": "https://github.com/indiesystems/laravel-load-guard",
+    "support": {
+        "issues": "https://github.com/indiesystems/laravel-load-guard/issues",
+        "source": "https://github.com/indiesystems/laravel-load-guard"
+    },
+    "require": {
+        "php": "^8.1",
+        "illuminate/support": "^9.0|^10.0|^11.0",
+        "illuminate/http": "^9.0|^10.0|^11.0",
+        "illuminate/routing": "^9.0|^10.0|^11.0",
+        "illuminate/console": "^9.0|^10.0|^11.0",
+        "illuminate/cache": "^9.0|^10.0|^11.0"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^7.0|^8.0|^9.0",
+        "phpunit/phpunit": "^9.5|^10.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "IndieSystems\\LoadGuard\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "IndieSystems\\LoadGuard\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "IndieSystems\\LoadGuard\\Providers\\LoadGuardServiceProvider"
+            ]
+        }
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}
