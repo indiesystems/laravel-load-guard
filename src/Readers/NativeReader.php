@@ -37,7 +37,7 @@ class NativeReader implements ReaderInterface
         if (is_readable('/proc/cpuinfo')) {
             $content = file_get_contents('/proc/cpuinfo');
             if ($content !== false) {
-                $cores = substr_count($content, 'processor');
+                $cores = preg_match_all('/^processor\s*:/m', $content);
                 $cores = max(1, $cores);
             }
         }
@@ -76,7 +76,7 @@ class NativeReader implements ReaderInterface
         $result['mem_available'] = round(($values['MemAvailable'] ?? 0) / 1024, 1);
         $result['swap_total'] = round(($values['SwapTotal'] ?? 0) / 1024, 1);
         $swapFree = round(($values['SwapFree'] ?? 0) / 1024, 1);
-        $result['swap_used'] = round($result['swap_total'] - $swapFree, 1);
+        $result['swap_used'] = max(0, round($result['swap_total'] - $swapFree, 1));
 
         return $result;
     }

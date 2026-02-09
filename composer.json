@@ -41,7 +41,10 @@
         "laravel": {
             "providers": [
                 "IndieSystems\\LoadGuard\\Providers\\LoadGuardServiceProvider"
-            ]
+            ],
+            "aliases": {
+                "LoadGuard": "IndieSystems\\LoadGuard\\Facades\\LoadGuard"
+            }
         }
     },
     "config": {

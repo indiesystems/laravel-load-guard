@@ -22,32 +22,9 @@ class LoadGuardManager
             return true;
         }
 
-        $metrics = $this->getMetrics();
-        $thresholds = $this->resolveThresholds($priority);
+        $state = $this->evaluate($priority);
 
-        $exceeded = $this->checkThresholds($metrics, $thresholds);
-        $isOverloaded = !empty($exceeded);
-
-        if ($isOverloaded) {
-            Cache::put('load_guard.last_overload', now()->timestamp, config('load-guard.cooldown', 30) * 2);
-        }
-
-        // Cooldown check: even if metrics are healthy, stay in overloaded state until cooldown expires
-        if (!$isOverloaded) {
-            $lastOverload = Cache::get('load_guard.last_overload');
-            if ($lastOverload) {
-                $cooldown = config('load-guard.cooldown', 30);
-                $elapsed = now()->timestamp - $lastOverload;
-                if ($elapsed < $cooldown) {
-                    $isOverloaded = true;
-                }
-            }
-        }
-
-        // State transition events
-        $this->handleStateTransition($isOverloaded, $metrics, $exceeded);
-
-        return !$isOverloaded;
+        return $state['can_accept_work'];
     }
 
     public function getMetrics(): Metrics
@@ -66,27 +43,110 @@ class LoadGuardManager
 
     public function getStatus(): array
     {
-        $metrics = $this->getMetrics();
-        $thresholds = $this->resolveThresholds('normal');
-        $exceeded = $this->checkThresholds($metrics, $thresholds);
-        $isOverloaded = !empty($exceeded);
+        if (!config('load-guard.enabled', true)) {
+            $metrics = $this->getMetrics();
+            $thresholds = $this->resolveThresholds('normal');
 
-        // Check cooldown
+            return [
+                'status' => 'healthy',
+                'can_accept_work' => true,
+                'cpu' => [
+                    'load' => $metrics->cpu_load,
+                    'cores' => $metrics->cpu_cores,
+                    'percent' => $metrics->cpu_percent,
+                    'threshold' => $thresholds['cpu'],
+                ],
+                'memory' => [
+                    'total_mb' => $metrics->memory_total_mb,
+                    'available_mb' => $metrics->memory_available_mb,
+                    'used_mb' => $metrics->memory_used_mb,
+                    'percent' => $metrics->memory_percent,
+                    'threshold' => $thresholds['memory'],
+                ],
+                'swap' => [
+                    'total_mb' => $metrics->swap_total_mb,
+                    'used_mb' => $metrics->swap_used_mb,
+                    'threshold' => $thresholds['swap'],
+                ],
+                'cooldown' => [
+                    'active' => false,
+                    'remaining_seconds' => 0,
+                ],
+                'reader' => $this->getReaderName(),
+                'timestamp' => $metrics->timestamp->toIso8601String(),
+            ];
+        }
+
+        $state = $this->evaluate('normal');
+
+        return [
+            'status' => $state['status'],
+            'can_accept_work' => $state['can_accept_work'],
+            'cpu' => [
+                'load' => $state['metrics']->cpu_load,
+                'cores' => $state['metrics']->cpu_cores,
+                'percent' => $state['metrics']->cpu_percent,
+                'threshold' => $state['thresholds']['cpu'],
+            ],
+            'memory' => [
+                'total_mb' => $state['metrics']->memory_total_mb,
+                'available_mb' => $state['metrics']->memory_available_mb,
+                'used_mb' => $state['metrics']->memory_used_mb,
+                'percent' => $state['metrics']->memory_percent,
+                'threshold' => $state['thresholds']['memory'],
+            ],
+            'swap' => [
+                'total_mb' => $state['metrics']->swap_total_mb,
+                'used_mb' => $state['metrics']->swap_used_mb,
+                'threshold' => $state['thresholds']['swap'],
+            ],
+            'cooldown' => [
+                'active' => $state['cooldown_active'],
+                'remaining_seconds' => $state['cooldown_remaining'],
+            ],
+            'reader' => $this->getReaderName(),
+            'timestamp' => $state['metrics']->timestamp->toIso8601String(),
+        ];
+    }
+
+    /**
+     * Central state evaluation — single code path for all overload checks.
+     * Handles threshold checks, cooldown, cache writes, and event firing.
+     */
+    protected function evaluate(string $priority): array
+    {
+        $metrics = $this->getMetrics();
+        $thresholds = $this->resolveThresholds($priority);
+
+        $exceeded = $this->checkThresholds($metrics, $thresholds);
+        $thresholdsExceeded = !empty($exceeded);
+
+        // If thresholds are currently exceeded, record the overload timestamp
+        if ($thresholdsExceeded) {
+            $cooldownSeconds = config('load-guard.cooldown', 30);
+            Cache::put('load_guard.last_overload', now()->timestamp, $cooldownSeconds * 2);
+        }
+
+        // Cooldown check: even if metrics recovered, stay overloaded until cooldown expires
         $cooldownActive = false;
         $cooldownRemaining = 0;
-        $lastOverload = Cache::get('load_guard.last_overload');
-        if ($lastOverload) {
-            $cooldown = config('load-guard.cooldown', 30);
-            $elapsed = now()->timestamp - $lastOverload;
-            if ($elapsed < $cooldown) {
-                $cooldownActive = true;
-                $cooldownRemaining = $cooldown - $elapsed;
+
+        if (!$thresholdsExceeded) {
+            $lastOverload = Cache::get('load_guard.last_overload');
+            if ($lastOverload) {
+                $cooldownSeconds = config('load-guard.cooldown', 30);
+                $elapsed = now()->timestamp - $lastOverload;
+                if ($elapsed < $cooldownSeconds) {
+                    $cooldownActive = true;
+                    $cooldownRemaining = $cooldownSeconds - $elapsed;
+                }
             }
         }
 
-        $canAcceptWork = !$isOverloaded && !$cooldownActive;
+        $isOverloaded = $thresholdsExceeded || $cooldownActive;
 
-        if ($isOverloaded) {
+        // Determine display status
+        if ($thresholdsExceeded) {
             $status = 'overloaded';
         } elseif ($cooldownActive) {
             $status = 'cooldown';
@@ -94,33 +154,18 @@ class LoadGuardManager
             $status = 'healthy';
         }
 
+        // Fire events on state transitions (only when thresholds actually exceeded,
+        // not during cooldown, to avoid misleading events with empty exceeded list)
+        $this->handleStateTransition($thresholdsExceeded, $metrics, $exceeded);
+
         return [
+            'can_accept_work' => !$isOverloaded,
             'status' => $status,
-            'can_accept_work' => $canAcceptWork,
-            'cpu' => [
-                'load' => $metrics->cpu_load,
-                'cores' => $metrics->cpu_cores,
-                'percent' => $metrics->cpu_percent,
-                'threshold' => $thresholds['cpu'],
-            ],
-            'memory' => [
-                'total_mb' => $metrics->memory_total_mb,
-                'available_mb' => $metrics->memory_available_mb,
-                'used_mb' => $metrics->memory_used_mb,
-                'percent' => $metrics->memory_percent,
-                'threshold' => $thresholds['memory'],
-            ],
-            'swap' => [
-                'total_mb' => $metrics->swap_total_mb,
-                'used_mb' => $metrics->swap_used_mb,
-                'threshold' => $thresholds['swap'],
-            ],
-            'cooldown' => [
-                'active' => $cooldownActive,
-                'remaining_seconds' => $cooldownRemaining,
-            ],
-            'reader' => $this->getReaderName(),
-            'timestamp' => $metrics->timestamp->toIso8601String(),
+            'metrics' => $metrics,
+            'thresholds' => $thresholds,
+            'exceeded' => $exceeded,
+            'cooldown_active' => $cooldownActive,
+            'cooldown_remaining' => $cooldownRemaining,
         ];
     }
 
@@ -132,7 +177,6 @@ class LoadGuardManager
             return $priorities[$priority];
         }
 
-        // Fall back to main thresholds
         return [
             'cpu' => config('load-guard.thresholds.cpu', 75),
             'memory' => config('load-guard.thresholds.memory', 80),
@@ -168,28 +212,34 @@ class LoadGuardManager
         return $exceeded;
     }
 
-    protected function handleStateTransition(bool $isOverloaded, Metrics $metrics, array $exceeded): void
+    /**
+     * Fire events only on actual state transitions (thresholds exceeded/recovered).
+     * Uses $thresholdsExceeded (not cooldown-inflated overload) so events
+     * always carry meaningful exceeded data.
+     */
+    protected function handleStateTransition(bool $thresholdsExceeded, Metrics $metrics, array $exceeded): void
     {
         if (!config('load-guard.events.enabled', true)) {
             return;
         }
 
         $previousState = Cache::get('load_guard.state', 'healthy');
-        $currentState = $isOverloaded ? 'overloaded' : 'healthy';
+        $currentState = $thresholdsExceeded ? 'overloaded' : 'healthy';
 
         if ($previousState === $currentState) {
             return;
         }
 
-        Cache::put('load_guard.state', $currentState, 3600);
+        // Use forever() instead of a fixed TTL so state doesn't silently expire
+        // and cause duplicate transition events
+        Cache::forever('load_guard.state', $currentState);
 
         if ($currentState === 'overloaded') {
-            Cache::put('load_guard.overload_started', now()->timestamp, 3600);
+            Cache::forever('load_guard.overload_started', now()->timestamp);
             event(new OverloadDetected($metrics, $exceeded));
         } else {
-            $startedAt = Cache::get('load_guard.overload_started', now()->timestamp);
+            $startedAt = Cache::pull('load_guard.overload_started', now()->timestamp);
             $duration = now()->timestamp - $startedAt;
-            Cache::forget('load_guard.overload_started');
             event(new LoadRecovered($metrics, $duration));
         }
     }
@@ -197,8 +247,12 @@ class LoadGuardManager
     protected function getReaderName(): string
     {
         $class = get_class($this->reader);
-        $parts = explode('\\', $class);
+        $short = substr(strrchr($class, '\\'), 1);
 
-        return str_replace('Reader', '', end($parts));
+        if (str_ends_with($short, 'Reader')) {
+            return substr($short, 0, -6);
+        }
+
+        return $short;
     }
 }

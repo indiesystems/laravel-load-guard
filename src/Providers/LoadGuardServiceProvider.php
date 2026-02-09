@@ -8,7 +8,6 @@ use IndieSystems\LoadGuard\Console\StatusCommand;
 use IndieSystems\LoadGuard\Console\WatchCommand;
 use IndieSystems\LoadGuard\LoadGuardManager;
 use IndieSystems\LoadGuard\Middleware\RejectWhenOverloaded;
-use IndieSystems\LoadGuard\Middleware\ThrottleWhenOverloaded;
 use IndieSystems\LoadGuard\Readers\NativeReader;
 use IndieSystems\LoadGuard\Readers\NullReader;
 use IndieSystems\LoadGuard\Readers\ReaderInterface;
@@ -47,7 +46,8 @@ class LoadGuardServiceProvider extends ServiceProvider
 
     public function boot(Router $router): void
     {
-        $router->aliasMiddleware('load-guard.throttle', ThrottleWhenOverloaded::class);
+        // Only register HTTP middleware on the router — ThrottleWhenOverloaded
+        // is a job middleware (uses $job->release()) and must not be routable.
         $router->aliasMiddleware('load-guard.reject', RejectWhenOverloaded::class);
 
         if (config('load-guard.health_check.enabled', true)) {

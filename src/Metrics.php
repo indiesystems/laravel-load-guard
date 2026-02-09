@@ -30,12 +30,12 @@ class Metrics
         $this->cpu_percent = round(($this->cpu_load / $this->cpu_cores) * 100, 1);
         $this->memory_total_mb = $memory_total_mb;
         $this->memory_available_mb = $memory_available_mb;
-        $this->memory_used_mb = round($memory_total_mb - $memory_available_mb, 1);
+        $this->memory_used_mb = max(0, round($memory_total_mb - $memory_available_mb, 1));
         $this->memory_percent = $memory_total_mb > 0
             ? round(($this->memory_used_mb / $memory_total_mb) * 100, 1)
             : 0.0;
         $this->swap_total_mb = $swap_total_mb;
-        $this->swap_used_mb = $swap_used_mb;
+        $this->swap_used_mb = max(0, $swap_used_mb);
         $this->timestamp = Carbon::now();
     }
 }
