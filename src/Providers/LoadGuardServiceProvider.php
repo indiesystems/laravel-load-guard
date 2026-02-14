@@ -4,6 +4,7 @@ namespace IndieSystems\LoadGuard\Providers;
 
 use Illuminate\Routing\Router;
 use Illuminate\Support\ServiceProvider;
+use IndieSystems\LoadGuard\Console\InstallCommand;
 use IndieSystems\LoadGuard\Console\StatusCommand;
 use IndieSystems\LoadGuard\Console\WatchCommand;
 use IndieSystems\LoadGuard\LoadGuardManager;
@@ -58,6 +59,7 @@ class LoadGuardServiceProvider extends ServiceProvider
             $this->commands([
                 StatusCommand::class,
                 WatchCommand::class,
+                InstallCommand::class,
             ]);
 
             $this->publishes([
